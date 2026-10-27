@@ -20,6 +20,15 @@ export interface DriveConnection {
   connectedAt: string | null
 }
 
+export interface DriveFile {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  modifiedTime: string | null
+  iconLink: string | null
+}
+
 export interface Folder {
   id: string
   name: string
@@ -39,6 +48,30 @@ export interface MediaFile {
   dimensions: string
   thumbnail: string
   uploadedBy: string
+  createdAt: string
+}
+
+export interface BufferConnectionState {
+  configured: boolean
+  status: 'active' | 'disabled' | 'error' | 'unconfigured'
+  accountName: string
+  accountEmail: string
+  organizationName: string
+  channelCount: number
+  maxChannels: number
+  limitReached: boolean
+  manageUrl: string
+  lastSyncedAt: string | null
+  lastError: string | null
+}
+
+export interface MediaTask {
+  id: string
+  source: 'upload' | 'google-drive'
+  status: 'uploading' | 'queued' | 'processing' | 'completed' | 'failed'
+  progress: number
+  name: string
+  error: string | null
   createdAt: string
 }
 
@@ -108,8 +141,10 @@ export interface AppState {
   users: User[]
   folders: Folder[]
   media: MediaFile[]
+  mediaTasks: MediaTask[]
   posts: Post[]
   accounts: SocialAccount[]
+  bufferConnection: BufferConnectionState
   driveConnection: DriveConnection
   notifications: AppNotification[]
   activities: Activity[]

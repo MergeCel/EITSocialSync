@@ -6,7 +6,7 @@ import PlatformIcon from '../components/PlatformIcon.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
 import { contentLabels, type Platform, type Post } from '../types'
-import { engagement, formatDate, formatFullNumber, formatNumber, isThisMonth } from '../utils'
+import { engagement, formatDate, formatFullNumber, formatNumber, isLastMonth, isThisMonth } from '../utils'
 
 type BoardMetric = 'engagement' | 'views' | 'likes'
 
@@ -15,7 +15,15 @@ const platforms: Platform[] = ['instagram', 'tiktok', 'facebook']
 const selectedPost = ref<Post | null>(null)
 const published = computed(() => store.state.posts.filter((post) => post.status === 'published' || post.status === 'partial'))
 const current = computed(() => published.value.filter((post) => isThisMonth(post.createdAt)))
+const previous = computed(() => published.value.filter((post) => isLastMonth(post.createdAt)))
 const totals = computed(() => Object.fromEntries(platforms.map((platform) => [platform, current.value.reduce((sum, post) => sum + engagement(post.metrics[platform]), 0)])) as Record<Platform, number>)
+const previousTotals = computed(() => Object.fromEntries(platforms.map((platform) => [platform, previous.value.reduce((sum, post) => sum + engagement(post.metrics[platform]), 0)])) as Record<Platform, number>)
+
+function trend(platform: Platform): number | null {
+  const before = previousTotals.value[platform]
+  if (!before) return null
+  return Math.round(((totals.value[platform] - before) / before) * 1000) / 10
+}
 const scheduled = computed(() => store.state.posts.filter((post) => post.status === 'scheduled').sort((a, b) => (a.scheduledAt ?? '').localeCompare(b.scheduledAt ?? '')).slice(0, 3))
 
 const boards = [
@@ -77,7 +85,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleEscape))
 
 <template>
   <section class="welcome-strip">
-    <div><span><Sparkles :size="15" /> Sabtu produktif</span><h2>Selamat datang kembali, {{ store.activeUser.name.split(' ')[0] }}.</h2><p>Konten bulan ini bergerak positif. Ada <strong>{{ scheduled.length }} post</strong> yang menunggu giliran tayang.</p></div>
+    <div><span><Sparkles :size="15" /> {{ new Intl.DateTimeFormat('id-ID', { weekday: 'long' }).format(new Date()) }} · workspace aktif</span><h2>Selamat datang kembali, {{ store.activeUser.name.split(' ')[0] }}.</h2><p>Ada <strong>{{ scheduled.length }} post</strong> yang menunggu giliran tayang dan {{ store.state.media.length }} media siap digunakan.</p></div>
     <RouterLink v-if="!store.isViewer" to="/composer" class="button button-light"><Plus :size="18" /> Susun konten baru</RouterLink>
     <div class="welcome-orbit orbit-one"/><div class="welcome-orbit orbit-two"/>
   </section>
@@ -89,7 +97,8 @@ onUnmounted(() => window.removeEventListener('keydown', handleEscape))
       <article v-for="(platform, index) in platforms" :key="platform" class="platform-stat">
         <div class="platform-stat-label"><PlatformIcon :platform="platform" /><span>{{ platform }}</span></div>
         <strong>{{ formatNumber(totals[platform]) }}</strong>
-        <p :class="index === 2 ? 'trend-down' : 'trend-up'"><component :is="index === 2 ? TrendingDown : TrendingUp" :size="15" />{{ index === 0 ? '12,8' : index === 1 ? '18,4' : '2,1' }}% <span>vs bulan lalu</span></p>
+        <p v-if="trend(platform) !== null" :class="trend(platform)! < 0 ? 'trend-down' : 'trend-up'"><component :is="trend(platform)! < 0 ? TrendingDown : TrendingUp" :size="15" />{{ new Intl.NumberFormat('id-ID', { maximumFractionDigits: 1 }).format(Math.abs(trend(platform)!)) }}% <span>vs bulan lalu</span></p>
+        <p v-else class="trend-up"><TrendingUp :size="15" /><span>Belum ada pembanding bulan lalu</span></p>
       </article>
     </div>
   </section>
