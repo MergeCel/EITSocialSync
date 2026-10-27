@@ -19,7 +19,12 @@ const daysInMonth = computed(() => new Date(cursor.value.getFullYear(), cursor.v
 const firstDay = computed(() => (new Date(cursor.value.getFullYear(), cursor.value.getMonth(), 1).getDay() + 6) % 7)
 const monthPosts = computed(() => store.state.posts.filter((post) => post.scheduledAt && new Date(post.scheduledAt).getMonth() === cursor.value.getMonth() && new Date(post.scheduledAt).getFullYear() === cursor.value.getFullYear() && post.status !== 'cancelled'))
 const selectedPosts = computed(() => monthPosts.value.filter((post) => new Date(post.scheduledAt!).getDate() === selectedDay.value).sort((a, b) => a.scheduledAt!.localeCompare(b.scheduledAt!)))
-const cells = computed(() => [...Array(firstDay.value).fill(null), ...Array.from({ length: daysInMonth.value }, (_, index) => index + 1)])
+const scheduleCounts = computed(() => monthPosts.value.reduce<Record<number, number>>((counts, post) => {
+  const day = new Date(post.scheduledAt!).getDate()
+  counts[day] = (counts[day] ?? 0) + 1
+  return counts
+}, {}))
+const cells = computed<Array<number | null>>(() => [...Array<number | null>(firstDay.value).fill(null), ...Array.from({ length: daysInMonth.value }, (_, index) => index + 1)])
 const weekdays = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min']
 
 function moveMonth(offset: number) {
@@ -43,12 +48,9 @@ function compose(day = selectedDay.value) {
     <section class="card month-calendar">
       <div class="weekday-row"><span v-for="day in weekdays" :key="day">{{ day }}</span></div>
       <div class="calendar-grid">
-        <button v-for="(day, index) in cells" :key="index" :disabled="!day" :class="{ selected: day === selectedDay, today: day === new Date().getDate() && cursor.getMonth() === new Date().getMonth() }" @click="day && (selectedDay = day)">
+        <button v-for="(day, index) in cells" :key="index" :disabled="!day" :class="{ selected: day === selectedDay, today: day === new Date().getDate() && cursor.getMonth() === new Date().getMonth(), 'has-events': day && scheduleCounts[day] }" :aria-label="day ? `${day} ${monthLabel}${scheduleCounts[day] ? `, ${scheduleCounts[day]} jadwal` : ', tidak ada jadwal'}` : undefined" @click="day && (selectedDay = day)">
           <span v-if="day" class="day-number">{{ day }}</span>
-          <div v-if="day" class="day-events">
-            <span v-for="post in monthPosts.filter((item) => new Date(item.scheduledAt!).getDate() === day).slice(0, 2)" :key="post.id" :class="`event-${post.type}`"><i/>{{ post.title }}</span>
-            <small v-if="monthPosts.filter((item) => new Date(item.scheduledAt!).getDate() === day).length > 2">+{{ monthPosts.filter((item) => new Date(item.scheduledAt!).getDate() === day).length - 2 }} lainnya</small>
-          </div>
+          <span v-if="day && scheduleCounts[day]" class="schedule-count"><i/>{{ scheduleCounts[day] }} jadwal</span>
         </button>
       </div>
     </section>

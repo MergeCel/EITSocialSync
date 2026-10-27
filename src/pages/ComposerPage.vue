@@ -23,11 +23,14 @@ const contentTypes: { type: ContentType; icon: typeof Film; detail: string }[] =
   { type: 'carousel', icon: Images, detail: '2–15 foto' },
 ]
 const platforms: Platform[] = ['instagram', 'tiktok', 'facebook']
+const initialType = existing?.type ?? 'video'
+const initialPlatforms = existing?.platforms.map((item) => item.platform) ?? ['instagram'] as Platform[]
+const existingSettings = Object.fromEntries(existing?.platforms.map((item) => [item.platform, item.settings]) ?? []) as Partial<Record<Platform, Record<string, string | boolean>>>
 const form = reactive({
-  title: existing?.title ?? '', type: existing?.type ?? 'video' as ContentType, caption: existing?.caption ?? '', hashtags: existing?.hashtags ?? '',
-  mediaIds: existing ? [...existing.mediaIds] : [] as string[], platforms: existing?.platforms.map((item) => item.platform) ?? ['instagram'] as Platform[],
+  title: existing?.title ?? '', type: initialType as ContentType, caption: existing?.caption ?? '', hashtags: existing?.hashtags ?? '',
+  mediaIds: existing ? [...existing.mediaIds] : [] as string[], platforms: [...initialPlatforms] as Platform[],
   scheduledAt: existing?.scheduledAt ? new Date(new Date(existing.scheduledAt).getTime() - new Date(existing.scheduledAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : (route.query.date as string ?? ''),
-  settings: { instagram: { location: '', branded: false, partner: '', altText: '', music: '' }, tiktok: { music: '', duet: true, stitch: true, comments: true, photoMode: false }, facebook: { location: '', audience: 'public', comments: true, altText: '' } } as Record<Platform, Record<string, string | boolean>>,
+  settings: { instagram: { location: '', branded: false, partner: '', altText: '', music: '', ...existingSettings.instagram }, tiktok: { music: '', duet: true, stitch: true, comments: true, photoMode: ['photo', 'carousel'].includes(initialType) && initialPlatforms.includes('tiktok'), ...existingSettings.tiktok }, facebook: { location: '', audience: 'public', comments: true, altText: '', ...existingSettings.facebook } } as Record<Platform, Record<string, string | boolean>>,
 })
 
 const availableMedia = computed(() => store.state.media.filter((media) => form.type === 'video' ? media.kind === 'video' : form.type === 'story' ? true : media.kind === 'image'))
@@ -37,8 +40,12 @@ const needsCaption = computed(() => form.type !== 'story')
 function compatibility(platform: Platform) {
   if (form.type === 'story' && platform === 'tiktok') return 'Story TikTok tidak didukung pada MVP.'
   if (form.type === 'carousel' && platform === 'facebook') return 'Facebook tidak mendukung carousel organik melalui API ini.'
-  if (form.type === 'photo' && platform === 'tiktok' && !form.settings.tiktok.photoMode) return 'Aktifkan Foto Mode pada Advanced Settings.'
   return ''
+}
+
+function platformDescription(platform: Platform) {
+  if (platform === 'tiktok' && ['photo', 'carousel'].includes(form.type)) return 'TikTok Photo Mode aktif'
+  return compatibility(platform) || 'Tersedia untuk format ini'
 }
 
 function chooseType(type: ContentType) {
@@ -46,6 +53,7 @@ function chooseType(type: ContentType) {
   form.mediaIds = []
   form.platforms = form.platforms.filter((platform) => !compatibility(platform))
   if (!form.platforms.length) form.platforms = ['instagram']
+  form.settings.tiktok.photoMode = ['photo', 'carousel'].includes(type) && form.platforms.includes('tiktok')
 }
 
 function togglePlatform(platform: Platform) {
@@ -54,6 +62,7 @@ function togglePlatform(platform: Platform) {
   const index = form.platforms.indexOf(platform)
   if (index >= 0) form.platforms.splice(index, 1)
   else form.platforms.push(platform)
+  if (platform === 'tiktok') form.settings.tiktok.photoMode = index < 0 && ['photo', 'carousel'].includes(form.type)
 }
 
 function toggleMedia(id: string) {
@@ -71,6 +80,7 @@ function validate() {
   if (!form.title.trim()) result.push('Judul internal wajib diisi.')
   if (!form.mediaIds.length) result.push('Pilih minimal satu media dari Drive.')
   if (form.type === 'carousel' && (form.mediaIds.length < 2 || form.mediaIds.length > 15)) result.push('Carousel membutuhkan 2–15 foto.')
+  if (form.type === 'carousel' && form.platforms.includes('instagram') && form.mediaIds.length > 10) result.push('Instagram membatasi carousel maksimal 10 foto.')
   if (needsCaption.value && !form.caption.trim()) result.push('Caption wajib diisi untuk tipe konten ini.')
   if (!form.platforms.length) result.push('Pilih minimal satu platform tujuan.')
   if (mode.value === 'schedule' && (!form.scheduledAt || new Date(form.scheduledAt) <= new Date())) result.push('Jadwal harus berada di waktu yang akan datang.')
@@ -79,15 +89,38 @@ function validate() {
 }
 
 async function submit() {
+  form.settings.tiktok.photoMode = form.platforms.includes('tiktok') && ['photo', 'carousel'].includes(form.type)
   if (!validate()) return
   submitting.value = true
-  const post = store.savePost({ id: existing?.id, title: form.title, type: form.type, caption: form.caption, hashtags: form.hashtags, mediaIds: form.mediaIds, platforms: form.platforms, scheduledAt: mode.value === 'schedule' ? new Date(form.scheduledAt).toISOString() : null, settings: form.settings })
-  if (mode.value === 'schedule') { await new Promise((resolve) => setTimeout(resolve, 650)); submitting.value = false; router.push('/schedule'); return }
-  await new Promise((resolve) => setTimeout(resolve, 1800))
-  const failure = form.platforms.length > 1 && form.platforms.includes('facebook') && store.state.accounts.find((account) => account.platform === 'facebook')?.status !== 'connected' ? 'facebook' : undefined
-  store.finishPublishing(post.id, failure)
+  const post = await store.savePost({ id: existing?.id, title: form.title, type: form.type, caption: form.caption, hashtags: form.hashtags, mediaIds: form.mediaIds, platforms: form.platforms, scheduledAt: mode.value === 'schedule' ? new Date(form.scheduledAt).toISOString() : null, settings: form.settings })
   submitting.value = false
+  if (!post) return
+
+  if (mode.value === 'schedule') {
+    router.push('/schedule')
+    return
+  }
+
   router.push(`/engagement/${post.id}`)
+}
+
+async function saveDraft() {
+  form.settings.tiktok.photoMode = form.platforms.includes('tiktok') && ['photo', 'carousel'].includes(form.type)
+  const post = await store.savePost({
+    id: existing?.id,
+    title: form.title || 'Draft tanpa judul',
+    type: form.type,
+    caption: form.caption,
+    hashtags: form.hashtags,
+    mediaIds: form.mediaIds,
+    platforms: form.platforms,
+    scheduledAt: mode.value === 'schedule' && form.scheduledAt ? new Date(form.scheduledAt).toISOString() : null,
+    settings: form.settings,
+    asDraft: true,
+  })
+  if (!post) return
+  store.notify('success', 'Draft tersimpan', 'Konten dapat dilanjutkan dari halaman Draft.')
+  router.push('/drafts')
 }
 </script>
 
@@ -119,7 +152,7 @@ async function submit() {
       <section class="card form-section">
         <div class="form-section-title"><span>03</span><div><h2>Platform Tujuan</h2><p>Pilih tempat konten akan dipublikasikan</p></div></div>
         <div class="platform-choice-grid">
-          <button v-for="platform in platforms" :key="platform" type="button" :disabled="Boolean(compatibility(platform))" :class="{ active: form.platforms.includes(platform) }" :title="compatibility(platform)" @click="togglePlatform(platform)"><PlatformIcon :platform="platform" size="lg"/><span><strong>{{ platformLabels[platform] }}</strong><small>{{ compatibility(platform) || 'Tersedia untuk format ini' }}</small></span><i><Check :size="13"/></i></button>
+          <button v-for="platform in platforms" :key="platform" type="button" :disabled="Boolean(compatibility(platform))" :class="{ active: form.platforms.includes(platform) }" :title="compatibility(platform)" @click="togglePlatform(platform)"><PlatformIcon :platform="platform" size="lg"/><span><strong>{{ platformLabels[platform] }}</strong><small>{{ platformDescription(platform) }}</small></span><i><Check :size="13"/></i></button>
         </div>
       </section>
 
@@ -127,7 +160,7 @@ async function submit() {
         <div class="form-section-title"><span>04</span><div><h2>Caption</h2><p>Pesan utama yang ikut dipublikasikan</p></div></div>
         <label class="field-label">Caption <em>Wajib</em><textarea v-model="form.caption" rows="5" maxlength="2200" placeholder="Tulis cerita untuk audiens Anda..."/><small>{{ form.caption.length }} / 2.200 karakter</small></label>
         <label class="field-label">Hashtag<input v-model="form.hashtags" placeholder="#SocialSync #Campaign"/></label>
-        <div class="info-note"><Info :size="17"/><p><strong>Mention prototype.</strong> Teks @username akan ditampilkan sebagai preview. Integrasi produksi akan mengubahnya menjadi entity platform tervalidasi.</p></div>
+        <div class="info-note"><Info :size="17"/><p><strong>Mention.</strong> Teks @username dikirim sebagai bagian caption. Validasi entity mention otomatis mengikuti dukungan masing-masing API platform.</p></div>
       </section>
 
       <section v-if="mode === 'schedule'" class="card form-section schedule-field-section">
@@ -138,14 +171,14 @@ async function submit() {
       <section class="card advanced-section">
         <button type="button" @click="advancedOpen = !advancedOpen"><span><Settings2 :size="20"/><span><strong>Advanced Settings</strong><small>Pengaturan khusus platform terpilih</small></span></span><ChevronDown :size="19" :class="{ rotate: advancedOpen }"/></button>
         <div v-if="advancedOpen" class="advanced-body">
-          <div v-if="form.platforms.includes('instagram')" class="advanced-platform"><h3><PlatformIcon platform="instagram"/> Instagram</h3><div class="field-grid"><label>Lokasi<div class="input-with-icon"><MapPin :size="17"/><input v-model="form.settings.instagram.location" placeholder="Cari lokasi..."/></div></label><label>Sound / Music<div class="input-with-icon"><Music2 :size="17"/><input v-model="form.settings.instagram.music" placeholder="Pilih track (simulasi)"/></div></label></div><label class="toggle-row"><span><strong>Branded Content</strong><small>Tampilkan label paid partnership</small></span><input v-model="form.settings.instagram.branded" type="checkbox"/></label><input v-if="form.settings.instagram.branded" v-model="form.settings.instagram.partner" placeholder="Nama brand partner"/></div>
-          <div v-if="form.platforms.includes('tiktok')" class="advanced-platform"><h3><PlatformIcon platform="tiktok"/> TikTok</h3><label v-if="form.type === 'photo'" class="toggle-row"><span><strong>Foto Mode</strong><small>Wajib untuk post foto tunggal</small></span><input v-model="form.settings.tiktok.photoMode" type="checkbox" @change="form.settings.tiktok.photoMode && !form.platforms.includes('tiktok') ? form.platforms.push('tiktok') : null"/></label><label class="toggle-row"><span><strong>Izinkan komentar</strong><small>Audiens dapat memberikan komentar</small></span><input v-model="form.settings.tiktok.comments" type="checkbox"/></label><label class="toggle-row"><span><strong>Izinkan Duet & Stitch</strong><small>Konten dapat digunakan kreator lain</small></span><input v-model="form.settings.tiktok.duet" type="checkbox"/></label></div>
+          <div v-if="form.platforms.includes('instagram')" class="advanced-platform"><h3><PlatformIcon platform="instagram"/> Instagram</h3><div class="field-grid"><label>Lokasi<div class="input-with-icon"><MapPin :size="17"/><input v-model="form.settings.instagram.location" placeholder="Cari lokasi..."/></div></label><label>Sound / Music<div class="input-with-icon"><Music2 :size="17"/><input v-model="form.settings.instagram.music" placeholder="Nama track (opsional)"/></div></label></div><label class="toggle-row"><span><strong>Branded Content</strong><small>Tampilkan label paid partnership</small></span><input v-model="form.settings.instagram.branded" type="checkbox"/></label><input v-if="form.settings.instagram.branded" v-model="form.settings.instagram.partner" placeholder="Nama brand partner"/></div>
+          <div v-if="form.platforms.includes('tiktok')" class="advanced-platform"><h3><PlatformIcon platform="tiktok"/> TikTok</h3><label class="toggle-row"><span><strong>Izinkan komentar</strong><small>Audiens dapat memberikan komentar</small></span><input v-model="form.settings.tiktok.comments" type="checkbox"/></label><label class="toggle-row"><span><strong>Izinkan Duet & Stitch</strong><small>Konten dapat digunakan kreator lain</small></span><input v-model="form.settings.tiktok.duet" type="checkbox"/></label></div>
           <div v-if="form.platforms.includes('facebook')" class="advanced-platform"><h3><PlatformIcon platform="facebook"/> Facebook</h3><label>Audience<select v-model="form.settings.facebook.audience"><option value="public">Public</option><option value="friends">Friends</option></select></label><label class="toggle-row"><span><strong>Izinkan komentar</strong><small>Aktifkan diskusi pada post</small></span><input v-model="form.settings.facebook.comments" type="checkbox"/></label></div>
         </div>
       </section>
 
       <div v-if="errors.length" class="validation-box"><strong>Periksa kembali isian berikut:</strong><ul><li v-for="error in errors" :key="error">{{ error }}</li></ul></div>
-      <div class="composer-actions"><RouterLink to="/dashboard" class="button">Simpan sebagai Draft</RouterLink><button class="button button-primary button-submit" :disabled="submitting"><component :is="mode === 'now' ? Send : CalendarClock" :size="18"/>{{ existing ? 'Simpan Perubahan' : mode === 'now' ? 'Upload Sekarang' : 'Jadwalkan Post' }}</button></div>
+      <div class="composer-actions"><button type="button" class="button" :disabled="submitting" @click="saveDraft">Simpan sebagai Draft</button><button class="button button-primary button-submit" :disabled="submitting"><component :is="mode === 'now' ? Send : CalendarClock" :size="18"/>{{ existing && existing.status !== 'draft' ? 'Simpan Perubahan' : mode === 'now' ? 'Upload Sekarang' : 'Jadwalkan Post' }}</button></div>
     </form>
 
     <aside class="composer-preview card"><div class="preview-title"><span>LIVE PREVIEW</span><p>Tampilan indikatif</p></div><div class="phone-frame"><div class="phone-top"/><div class="preview-account"><div class="avatar avatar-small">SS</div><div><strong>socialsync.id</strong><span>Sponsored · 1m</span></div><MoreIcon /></div><div class="preview-media"><img v-if="selectedMedia[0]" :src="selectedMedia[0].thumbnail" alt="Preview"/><div v-else><Upload :size="31"/><span>Media preview</span></div><b v-if="selectedMedia.length > 1">1/{{ selectedMedia.length }}</b></div><div class="preview-icons">♡　⌁　➤ <span>⌑</span></div><div class="preview-caption"><strong>socialsync.id</strong> {{ form.caption || 'Caption Anda akan terlihat di sini...' }} <span>{{ form.hashtags }}</span></div></div><div class="preview-platforms"><span>Preview platform:</span><PlatformIcon v-for="platform in form.platforms" :key="platform" :platform="platform" size="sm"/></div></aside>
