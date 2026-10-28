@@ -99,6 +99,69 @@ class PostApiTest extends TestCase
         ])->assertUnprocessable();
     }
 
+    public function test_instagram_location_is_limited_to_two_hundred_characters(): void
+    {
+        [$user, $media] = $this->editorAndMedia();
+
+        $this->actingAs($user)->postJson('/api/posts', [
+            'title' => 'Lokasi terlalu panjang',
+            'type' => 'photo',
+            'caption' => 'Caption',
+            'mediaIds' => [$media->id],
+            'platforms' => ['instagram'],
+            'settings' => ['instagram' => ['location' => str_repeat('a', 201)]],
+            'asDraft' => true,
+        ])->assertUnprocessable()->assertJsonValidationErrors('settings.instagram.location');
+    }
+
+    public function test_removed_music_settings_are_not_persisted(): void
+    {
+        [$user, $media] = $this->editorAndMedia();
+
+        $this->actingAs($user)->postJson('/api/posts', [
+            'title' => 'Draft tanpa musik',
+            'type' => 'photo',
+            'caption' => 'Caption',
+            'mediaIds' => [$media->id],
+            'platforms' => ['instagram'],
+            'settings' => ['instagram' => ['music' => 'Nilai lama', 'location' => 'Jakarta']],
+            'asDraft' => true,
+        ])->assertCreated();
+
+        $settings = Post::query()
+            ->where('title', 'Draft tanpa musik')
+            ->firstOrFail()
+            ->platforms()
+            ->firstOrFail()
+            ->advanced_settings;
+
+        $this->assertArrayNotHasKey('music', $settings);
+        $this->assertSame('Jakarta', $settings['location']);
+    }
+
+    public function test_tiktok_carousel_is_limited_to_ten_images(): void
+    {
+        [$user, $media] = $this->editorAndMedia();
+        $mediaIds = [$media->id];
+
+        for ($index = 1; $index < 11; $index++) {
+            $copy = $media->replicate();
+            $copy->path = 'originals/'.Str::uuid().'/photo.jpg';
+            $copy->thumbnail_path = 'thumbnails/'.Str::uuid().'.jpg';
+            $copy->save();
+            $mediaIds[] = $copy->id;
+        }
+
+        $this->actingAs($user)->postJson('/api/posts', [
+            'title' => 'Carousel terlalu panjang',
+            'type' => 'carousel',
+            'caption' => 'Caption',
+            'mediaIds' => $mediaIds,
+            'platforms' => ['tiktok'],
+            'asDraft' => true,
+        ])->assertUnprocessable()->assertJsonValidationErrors('mediaIds');
+    }
+
     public function test_viewer_cannot_create_posts(): void
     {
         [$editor, $media] = $this->editorAndMedia();
