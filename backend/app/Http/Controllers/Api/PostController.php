@@ -163,8 +163,14 @@ class PostController extends Controller
             'platforms.*' => ['required', 'distinct', 'in:instagram,tiktok,facebook'],
             'scheduledAt' => ['nullable', 'date'],
             'settings' => ['nullable', 'array'],
+            'settings.instagram.location' => ['nullable', 'string', 'max:200'],
             'asDraft' => ['sometimes', 'boolean'],
         ]);
+
+        unset(
+            $validated['settings']['instagram']['music'],
+            $validated['settings']['tiktok']['music'],
+        );
 
         if (($validated['type'] ?? null) !== 'story' && blank($validated['caption'] ?? null)) {
             throw ValidationException::withMessages(['caption' => 'Caption wajib diisi untuk tipe konten ini.']);
@@ -205,7 +211,7 @@ class PostController extends Controller
         }
 
         if (in_array('tiktok', $platforms, true) && $type === 'story') {
-            throw ValidationException::withMessages(['platforms' => 'TikTok tidak mendukung Story pada MVP ini.']);
+            throw ValidationException::withMessages(['platforms' => 'Otomatisasi tidak mendukung fitur ini.']);
         }
 
         if (in_array('facebook', $platforms, true) && $type === 'carousel') {
@@ -214,6 +220,10 @@ class PostController extends Controller
 
         if (in_array('instagram', $platforms, true) && $type === 'carousel' && count($payload['mediaIds']) > 10) {
             throw ValidationException::withMessages(['mediaIds' => 'Instagram membatasi carousel maksimal 10 item.']);
+        }
+
+        if (in_array('tiktok', $platforms, true) && $type === 'carousel' && count($payload['mediaIds']) > 10) {
+            throw ValidationException::withMessages(['mediaIds' => 'TikTok membatasi carousel maksimal 10 foto.']);
         }
     }
 

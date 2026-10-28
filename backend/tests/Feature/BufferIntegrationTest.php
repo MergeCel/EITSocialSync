@@ -77,6 +77,7 @@ class BufferIntegrationTest extends TestCase
         $payload = json_decode((string) $history[0]['request']->getBody(), true, flags: JSON_THROW_ON_ERROR);
         $this->assertSame($expectedType, $payload['variables']['input']['metadata']['instagram']['type']);
         $this->assertSame($expectedType !== 'story', $payload['variables']['input']['metadata']['instagram']['shouldShareToFeed']);
+        $this->assertArrayNotHasKey('geolocation', $payload['variables']['input']['metadata']['instagram']);
     }
 
     /** @return array<string, array{string, string}> */
@@ -88,6 +89,40 @@ class BufferIntegrationTest extends TestCase
             'video' => ['video', 'reel'],
             'story' => ['story', 'story'],
         ];
+    }
+
+    public function test_instagram_publish_sends_the_configured_location_to_buffer(): void
+    {
+        $history = [];
+        $mock = new MockHandler([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'data' => [
+                    'createPost' => [
+                        '__typename' => 'PostActionSuccess',
+                        'post' => ['id' => 'buffer-post-location', 'externalLink' => null, 'status' => 'buffer'],
+                    ],
+                ],
+            ], JSON_THROW_ON_ERROR)),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push(Middleware::history($history));
+
+        $service = new BufferService;
+        (new ReflectionProperty($service, 'http'))->setValue($service, new Client(['handler' => $stack]));
+
+        $service->publish(
+            new BufferConnection(['api_key' => 'test-key']),
+            new SocialAccount(['platform' => 'instagram', 'internal_id' => 'channel-1']),
+            new Post(['title' => 'Lokasi Instagram', 'content_type' => 'photo', 'caption' => 'Caption']),
+            new PostPlatform(['platform' => 'instagram', 'advanced_settings' => ['location' => '  Jakarta, Indonesia  ']]),
+            [],
+        );
+
+        $payload = json_decode((string) $history[0]['request']->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame(
+            ['text' => 'Jakarta, Indonesia'],
+            $payload['variables']['input']['metadata']['instagram']['geolocation'],
+        );
     }
 
     public function test_tiktok_video_publish_sends_metadata_as_an_object(): void

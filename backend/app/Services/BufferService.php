@@ -195,7 +195,7 @@ class BufferService
                 'text' => $text,
                 'channelId' => $account->internal_id,
                 'assets' => $assets,
-                'metadata' => $this->postMetadata($account, $post),
+                'metadata' => $this->postMetadata($account, $post, $platform),
                 'mode' => 'shareNow',
                 'schedulingType' => 'automatic',
             ],
@@ -287,7 +287,7 @@ class BufferService
     }
 
     /** @return array<string, array<string, mixed>|object> */
-    private function postMetadata(SocialAccount $account, Post $post): array
+    private function postMetadata(SocialAccount $account, Post $post, PostPlatform $platform): array
     {
         $type = match ($post->content_type) {
             'story' => 'story',
@@ -295,13 +295,18 @@ class BufferService
             default => 'post',
         };
 
+        $instagram = [
+            'type' => $type,
+            'shouldShareToFeed' => $type !== 'story',
+        ];
+        $location = trim((string) ($platform->advanced_settings['location'] ?? ''));
+
+        if ($account->platform === 'instagram' && $location !== '') {
+            $instagram['geolocation'] = ['text' => mb_substr($location, 0, 200)];
+        }
+
         return match ($account->platform) {
-            'instagram' => [
-                'instagram' => [
-                    'type' => $type,
-                    'shouldShareToFeed' => $type !== 'story',
-                ],
-            ],
+            'instagram' => ['instagram' => $instagram],
             'facebook' => ['facebook' => ['type' => $type]],
             'tiktok' => ['tiktok' => in_array($post->content_type, ['photo', 'carousel'], true)
                 ? ['title' => mb_substr($post->title, 0, 90)]
