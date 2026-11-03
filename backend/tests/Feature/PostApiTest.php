@@ -49,6 +49,52 @@ class PostApiTest extends TestCase
         $this->assertDatabaseHas('posts', ['title' => 'Draft Kampanye', 'status' => 'draft']);
     }
 
+    public function test_editor_can_save_and_update_an_incomplete_draft_but_cannot_publish_it(): void
+    {
+        [$user] = $this->editorAndMedia();
+        $payload = [
+            'title' => 'Draft belum lengkap',
+            'type' => 'carousel',
+            'caption' => '',
+            'mediaIds' => [],
+            'platforms' => [],
+            'asDraft' => true,
+        ];
+
+        $response = $this->actingAs($user)->postJson('/api/posts', $payload)
+            ->assertCreated()
+            ->assertJsonPath('status', 'draft')
+            ->assertJsonPath('mediaIds', [])
+            ->assertJsonPath('platforms', []);
+        $id = $response->json('id');
+
+        $this->putJson('/api/posts/'.$id, $payload)->assertOk()->assertJsonPath('status', 'draft');
+        $this->postJson('/api/posts/'.$id.'/publish')
+            ->assertUnprocessable()->assertJsonValidationErrors(['mediaIds', 'platforms']);
+        $this->assertDatabaseHas('posts', ['id' => $id, 'status' => 'draft']);
+        Queue::assertNothingPushed();
+
+        $payload['asDraft'] = false;
+        $this->postJson('/api/posts', $payload)->assertUnprocessable();
+    }
+
+    public function test_complete_draft_can_still_be_published(): void
+    {
+        [$user, $media] = $this->editorAndMedia();
+        $response = $this->actingAs($user)->postJson('/api/posts', [
+            'title' => 'Draft siap',
+            'type' => 'photo',
+            'caption' => 'Caption',
+            'mediaIds' => [$media->id],
+            'platforms' => ['instagram'],
+            'asDraft' => true,
+        ])->assertCreated();
+
+        $this->postJson('/api/posts/'.$response->json('id').'/publish')
+            ->assertOk()->assertJsonPath('status', 'publishing');
+        Queue::assertPushed(PublishPostJob::class);
+    }
+
     public function test_publish_now_queues_the_publish_job(): void
     {
         [$user, $media] = $this->editorAndMedia();

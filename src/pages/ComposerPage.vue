@@ -15,6 +15,7 @@ const mode = ref<'now' | 'schedule'>(existing?.scheduledAt || route.query.mode =
 const advancedOpen = ref(false)
 const mediaPickerOpen = ref(false)
 const submitting = ref(false)
+const savingDraft = ref(false)
 const errors = ref<string[]>([])
 const previewIndex = ref(0)
 const previewTouchStart = ref<number | null>(null)
@@ -129,22 +130,30 @@ async function submit() {
 }
 
 async function saveDraft() {
-  form.settings.tiktok.photoMode = form.platforms.includes('tiktok') && ['photo', 'carousel'].includes(form.type)
-  const post = await store.savePost({
-    id: existing?.id,
-    title: form.title || 'Draft tanpa judul',
-    type: form.type,
-    caption: form.caption,
-    hashtags: form.hashtags,
-    mediaIds: form.mediaIds,
-    platforms: form.platforms,
-    scheduledAt: mode.value === 'schedule' && form.scheduledAt ? new Date(form.scheduledAt).toISOString() : null,
-    settings: form.settings,
-    asDraft: true,
-  })
-  if (!post) return
-  store.notify('success', 'Draft tersimpan', 'Konten dapat dilanjutkan dari halaman Draft.')
-  router.push('/drafts')
+  if (submitting.value) return
+  savingDraft.value = true
+  submitting.value = true
+  try {
+    form.settings.tiktok.photoMode = form.platforms.includes('tiktok') && ['photo', 'carousel'].includes(form.type)
+    const post = await store.savePost({
+      id: existing?.id,
+      title: form.title.trim() || 'Draft tanpa judul',
+      type: form.type,
+      caption: form.caption,
+      hashtags: form.hashtags,
+      mediaIds: form.mediaIds,
+      platforms: form.platforms,
+      scheduledAt: mode.value === 'schedule' && form.scheduledAt ? new Date(form.scheduledAt).toISOString() : null,
+      settings: form.settings,
+      asDraft: true,
+    })
+    if (!post) return
+    store.notify('success', 'Draft tersimpan', 'Konten dapat dilanjutkan dari halaman Draft.')
+    router.push('/drafts')
+  } finally {
+    submitting.value = false
+    savingDraft.value = false
+  }
 }
 </script>
 
@@ -209,7 +218,7 @@ async function saveDraft() {
   </div>
 
   <div v-if="mediaPickerOpen" class="modal-backdrop" @click.self="mediaPickerOpen = false"><section class="modal-card media-picker-modal"><button class="icon-button close-button" @click="mediaPickerOpen = false"><X :size="20"/></button><span class="modal-kicker">PILIH DARI DRIVE</span><h2>{{ contentLabels[form.type] }}</h2><p>{{ form.type === 'carousel' ? `${form.mediaIds.length}/10 foto dipilih · Carousel TikTok hanya mendukung foto` : 'Pilih satu media untuk post ini' }}</p><div class="picker-grid"><button v-for="media in availableMedia" :key="media.id" :class="{ selected: form.mediaIds.includes(media.id) }" @click="toggleMedia(media.id)"><img :src="media.thumbnail" alt=""/><span>{{ media.name }}</span><i><Check :size="14"/></i></button></div><button class="button button-primary button-full" :disabled="!form.mediaIds.length" @click="mediaPickerOpen = false">Gunakan {{ form.mediaIds.length }} Media</button></section></div>
-  <div v-if="submitting" class="loading-overlay"><LoaderCircle :size="48"/><h2>{{ mode === 'now' ? 'Mempublikasikan konten...' : 'Menyimpan ke kalender...' }}</h2><p>{{ mode === 'now' ? `Mengirim ke ${form.platforms.map((platform) => platformLabels[platform]).join(', ')}` : 'Menyiapkan antrean publish otomatis' }}</p></div>
+  <div v-if="submitting" class="loading-overlay"><LoaderCircle :size="48"/><h2>{{ savingDraft ? 'Menyimpan draft...' : mode === 'now' ? 'Mempublikasikan konten...' : 'Menyimpan ke kalender...' }}</h2><p>{{ savingDraft ? 'Menyimpan isian untuk dilanjutkan nanti' : mode === 'now' ? `Mengirim ke ${form.platforms.map((platform) => platformLabels[platform]).join(', ')}` : 'Menyiapkan antrean publish otomatis' }}</p></div>
 </template>
 
 <script lang="ts">

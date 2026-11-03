@@ -124,6 +124,17 @@ class PostController extends Controller
 
         abort_unless(in_array($post->status, ['draft', 'scheduled', 'cancelled'], true), 422, 'Post ini sudah diproses.');
 
+        $post->load(['platforms', 'orderedMedia']);
+        $payload = $this->validated(new Request([
+            'title' => $post->title,
+            'type' => $post->content_type,
+            'caption' => $post->caption,
+            'hashtags' => $post->hashtags,
+            'mediaIds' => $post->orderedMedia->modelKeys(),
+            'platforms' => $post->platforms->pluck('platform')->all(),
+        ]));
+        $this->assertCompatible($payload);
+
         $post->update(['status' => 'publishing', 'scheduled_at' => null]);
         PublishPostJob::dispatch($post->id)->onQueue('high');
 
@@ -152,14 +163,15 @@ class PostController extends Controller
      */
     private function validated(Request $request): array
     {
+        $isDraft = $request->boolean('asDraft');
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:120'],
             'type' => ['required', 'in:story,video,photo,carousel'],
             'caption' => ['nullable', 'string', 'max:2200'],
             'hashtags' => ['nullable', 'string', 'max:1000'],
-            'mediaIds' => ['required', 'array', 'min:1', 'max:15'],
+            'mediaIds' => [$isDraft ? 'present' : 'required', 'array', 'min:'.($isDraft ? 0 : 1), 'max:15'],
             'mediaIds.*' => ['required', 'uuid', 'distinct', 'exists:media_files,id'],
-            'platforms' => ['required', 'array', 'min:1'],
+            'platforms' => [$isDraft ? 'present' : 'required', 'array', 'min:'.($isDraft ? 0 : 1)],
             'platforms.*' => ['required', 'distinct', 'in:instagram,tiktok,facebook'],
             'scheduledAt' => ['nullable', 'date'],
             'settings' => ['nullable', 'array'],
@@ -172,7 +184,7 @@ class PostController extends Controller
             $validated['settings']['tiktok']['music'],
         );
 
-        if (($validated['type'] ?? null) !== 'story' && blank($validated['caption'] ?? null)) {
+        if (! $isDraft && ($validated['type'] ?? null) !== 'story' && blank($validated['caption'] ?? null)) {
             throw ValidationException::withMessages(['caption' => 'Caption wajib diisi untuk tipe konten ini.']);
         }
 
@@ -198,7 +210,7 @@ class PostController extends Controller
             throw ValidationException::withMessages(['mediaIds' => 'Salah satu media tidak ditemukan.']);
         }
 
-        if ($type === 'story' && count($payload['mediaIds']) !== 1) {
+        if ($type === 'story' && count($payload['mediaIds']) !== 1 && ! ($payload['asDraft'] ?? false)) {
             throw ValidationException::withMessages(['mediaIds' => 'Story hanya mendukung satu media.']);
         }
 
@@ -206,7 +218,7 @@ class PostController extends Controller
             throw ValidationException::withMessages(['mediaIds' => 'Tipe konten ini hanya mendukung foto.']);
         }
 
-        if ($type === 'carousel' && (count($payload['mediaIds']) < 2 || count($payload['mediaIds']) > 15)) {
+        if ($type === 'carousel' && ((! ($payload['asDraft'] ?? false) && count($payload['mediaIds']) < 2) || count($payload['mediaIds']) > 15)) {
             throw ValidationException::withMessages(['mediaIds' => 'Carousel membutuhkan 2–15 foto.']);
         }
 
