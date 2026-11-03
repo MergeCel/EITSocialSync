@@ -10,6 +10,8 @@ const router = useRouter()
 const store = useAppStore()
 const mobileMenu = ref(false)
 const profileOpen = ref(false)
+const sidebarProfileOpen = ref(false)
+watch(mobileMenu, (open) => { if (!open) sidebarProfileOpen.value = false })
 const pageTitle = computed(() => route.meta.title as string ?? 'SocialSync')
 const pageEyebrow = computed(() => route.meta.eyebrow as string ?? '')
 const isPublic = computed(() => Boolean(route.meta.public))
@@ -20,6 +22,8 @@ watch(() => store.authenticated, (authenticated) => {
 
 async function logout() {
   profileOpen.value = false
+  sidebarProfileOpen.value = false
+  mobileMenu.value = false
   await store.logout()
   await router.replace('/login')
 }
@@ -53,9 +57,16 @@ const adminNav = [
         <RouterLink v-for="item in adminNav" :key="item.to" :to="item.to" @click="mobileMenu = false"><component :is="item.icon" :size="19" />{{ item.label }}</RouterLink>
       </nav>
       <div class="sidebar-user">
+        <div v-if="sidebarProfileOpen" id="sidebar-profile-menu" class="profile-menu sidebar-profile-menu">
+          <p>Akun aktif</p>
+          <button type="button" @click="sidebarProfileOpen = false"><span class="avatar avatar-small">{{ store.activeUser.initials }}</span><span><strong>{{ store.activeUser.name }}</strong><small>{{ store.activeUser.email }}</small></span></button>
+          <button type="button" class="profile-logout" @click="logout"><LogOut :size="17"/><span><strong>Keluar</strong><small>Akhiri sesi di perangkat ini</small></span></button>
+        </div>
+        <button type="button" class="sidebar-user-trigger" :aria-expanded="sidebarProfileOpen" aria-controls="sidebar-profile-menu" aria-label="Menu akun sidebar" @click="sidebarProfileOpen = !sidebarProfileOpen; profileOpen = false" @keydown.esc="sidebarProfileOpen = false">
         <div class="avatar">{{ store.activeUser.initials }}</div>
         <div><strong>{{ store.activeUser.name }}</strong><span>{{ store.activeUser.role }}</span></div>
         <ChevronDown :size="17" />
+        </button>
       </div>
     </aside>
 
